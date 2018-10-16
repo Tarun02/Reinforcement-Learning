@@ -2,6 +2,7 @@ import gym
 import tensorflow as tf
 import numpy as np
 import random
+from collections import deque
 
 # General Parameters
 # -- DO NOT MODIFY --
@@ -13,9 +14,11 @@ TEST_FREQUENCY = 100  # Num episodes to run before visualizing test accuracy
 
 # TODO: HyperParameters
 GAMMA = 0.99 # discount factor
-INITIAL_EPSILON = 0.9 # starting value of epsilon
-FINAL_EPSILON = 0.05 # final value of epsilon
+INITIAL_EPSILON = 0.5 # starting value of epsilon
+FINAL_EPSILON = 0.01 # final value of epsilon
 EPSILON_DECAY_STEPS = 200 # decay period
+SIZE_BUFFER = 10000 # size of the buffer
+BATCH_SIZE = 64 # batch size
 
 # Create environment
 # -- DO NOT MODIFY --
@@ -31,20 +34,22 @@ action_in = tf.placeholder("float", [None, ACTION_DIM])
 target_in = tf.placeholder("float", [None])
 
 # TODO: Define Network Graph
-w1 = tf.Variable(tf.random_normal([STATE_DIM,20],stddev = 0.1))
-b1 = tf.Variable(tf.ones([20],dtype = tf.float32))
-w2 = tf.Variable(tf.random_normal([20,ACTION_DIM],stddev = 0.1))
-b2 = tf.Variable(tf.ones([ACTION_DIM]),dtype = tf.float32)
-
-hidden_layer = tf.nn.relu(tf.matmul(state_in,w1) + b1)
+w1 = tf.Variable(tf.truncated_normal([STATE_DIM,ACTION_DIM]))
+b1 = tf.Variable(tf.ones(shape = [ACTION_DIM]), dtype = tf.float32)
+# w2 = tf.Variable(tf.random_normal([20,ACTION_DIM],stddev = 0.1))
+# b2 = tf.Variable(tf.ones([ACTION_DIM]),dtype = tf.float32)
+#
+# hidden_layer = tf.nn.relu(tf.matmul(state_in,w1) + b1)
 
 # TODO: Network outputs
-q_values = tf.matmul(hidden_layer,w2) + b2
+q_values = tf.matmul(state_in,w1) + b1
 q_action = tf.reduce_sum(tf.multiply(q_values,action_in),reduction_indices=1)
 
 # TODO: Loss/Optimizer Definition
-loss = tf.reduce_mean(tf.square(q_action - target_in))
+loss = tf.reduce_mean((q_action - target_in))
 optimizer = tf.train.AdamOptimizer(0.0001).minimize(loss)
+
+replay_buffer = deque()
 
 # Start session - Tensorflow housekeeping
 session = tf.InteractiveSession()
@@ -65,8 +70,10 @@ def explore(state, epsilon):
         action = random.randint(0, ACTION_DIM - 1)
     else:
         action = np.argmax(Q_estimates)
+
     one_hot_action = np.zeros(ACTION_DIM)
     one_hot_action[action] = 1
+
     return one_hot_action
 
 
@@ -83,28 +90,58 @@ for episode in range(EPISODE):
     # Move through env according to e-greedy policy
     for step in range(STEP):
         action = explore(state, epsilon)
+
         next_state, reward, done, _ = env.step(np.argmax(action))
 
-        nextstate_q_values = q_values.eval(feed_dict={
-            state_in: [next_state]
-        })
 
-        # TODO: Calculate the target q-value.
-        # hint1: Bellman
-        # hint2: consider if the episode has terminated
-        target = GAMMA * np.max(nextstate_q_values) + reward
+        replay_buffer.append((state, action, reward, next_state, done))
 
-        # Do one training step
-        session.run([optimizer], feed_dict={
-            target_in: [target],
-            action_in: [action],
-            state_in: [state]
-        })
+        if len(replay_buffer) > SIZE_BUFFER:
+            replay_buffer.popleft()
+
+        if len(replay_buffer) > BATCH_SIZE:
+
+            minibatch = random.sample(replay_buffer, BATCH_SIZE)
+            state_batch = [x[0] for x in minibatch]
+            action_batch = [x[1] for x in minibatch]
+            reward_batch = [x[2] for x in minibatch]
+            next_state_batch = [x[3] for x in minibatch]
+
+            #print(minibatch)
+
+            target_batch = []
+
+            nextstate_q_values = q_values.eval(feed_dict={
+                state_in: next_state_batch
+            })
+
+            for i in range(BATCH_SIZE):
+                done = minibatch[i][4]
+
+                if done:
+                    target = reward_batch[i]
+                else:
+                    # TODO: Calculate the target q-value.
+                    # hint1: Bellman
+                    # hint2: consider if the episode has terminated
+                    target = GAMMA * np.max(nextstate_q_values[i]) + reward_batch[i]
+
+                target_batch.append(target)
+
+
+
+            # Do one training step
+            session.run([optimizer], feed_dict={
+                target_in: target_batch,
+                action_in: action_batch,
+                state_in: state_batch
+            })
 
         # Update
         state = next_state
         if done:
             break
+
 
     # Test and view sample runs - can disable render to save time
     # -- DO NOT MODIFY --
