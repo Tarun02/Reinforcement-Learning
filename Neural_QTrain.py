@@ -14,7 +14,7 @@ TEST_FREQUENCY = 100  # Num episodes to run before visualizing test accuracy
 
 # TODO: HyperParameters
 GAMMA = 0.99 # discount factor
-INITIAL_EPSILON = 0.5 # starting value of epsilon
+INITIAL_EPSILON = 0.5 # starting value of epsilon ### Kind of low.
 FINAL_EPSILON = 0.01 # final value of epsilon
 EPSILON_DECAY_STEPS = 200 # decay period
 SIZE_BUFFER = 10000 # size of the buffer
@@ -34,24 +34,35 @@ action_in = tf.placeholder("float", [None, ACTION_DIM])
 target_in = tf.placeholder("float", [None])
 
 # TODO: Define Network Graph
-w1 = tf.Variable(tf.truncated_normal([STATE_DIM,ACTION_DIM]))
-b1 = tf.Variable(tf.ones(shape = [ACTION_DIM]), dtype = tf.float32)
-# w2 = tf.Variable(tf.random_normal([20,ACTION_DIM],stddev = 0.1))
-# b2 = tf.Variable(tf.ones([ACTION_DIM]),dtype = tf.float32)
-#
-# hidden_layer = tf.nn.relu(tf.matmul(state_in,w1) + b1)
+def my_network(state_in, ACTION_DIM):
+    hidden_layer = tf.layers.dense(
+                state_in,
+                128,
+                kernel_initializer=tf.truncated_normal_initializer(),
+                bias_initializer=tf.constant_initializer(0.01),
+                activation=tf.nn.relu
+            )
+    output_layer = tf.layers.dense(
+                hidden_layer,
+                ACTION_DIM,
+                kernel_initializer=tf.truncated_normal_initializer(),
+                bias_initializer=tf.constant_initializer(0.01),
+            )
+
+    return output_layer
 
 # TODO: Network outputs
-q_values = tf.matmul(state_in,w1) + b1
+q_values = my_network(state_in,ACTION_DIM)
 q_action = tf.reduce_sum(tf.multiply(q_values,action_in),reduction_indices=1)
 
 # TODO: Loss/Optimizer Definition
-loss = tf.reduce_mean((q_action - target_in))
-optimizer = tf.train.AdamOptimizer(0.0001).minimize(loss)
+loss = tf.reduce_mean(tf.square(target_in - q_action))
+optimizer = tf.train.AdamOptimizer().minimize(loss)
 
 replay_buffer = deque()
 
 # Start session - Tensorflow housekeeping
+
 session = tf.InteractiveSession()
 session.run(tf.global_variables_initializer())
 
@@ -116,9 +127,8 @@ for episode in range(EPISODE):
             })
 
             for i in range(BATCH_SIZE):
-                done = minibatch[i][4]
 
-                if done:
+                if minibatch[i][4]:
                     target = reward_batch[i]
                 else:
                     # TODO: Calculate the target q-value.
@@ -150,7 +160,7 @@ for episode in range(EPISODE):
         for i in range(TEST):
             state = env.reset()
             for j in range(STEP):
-                env.render()
+                #env.render()
                 action = np.argmax(q_values.eval(feed_dict={
                     state_in: [state]
                 }))
